@@ -1,0 +1,126 @@
+---
+title: "Difference-in-Differences – Bazaar.com"
+author: "Yunchen Hsieh"
+date: "2023-11-11"
+output:
+  pdf_document: default
+  html_document: default
+---
+# Company Overview
+Online Marketing at Bazzar.com, the leading online retailer in the United States. It currently uses both display advertising and search egine advertising, running paid search ads on the two major search engine, Google and Bing.
+
+They now are discussing the recent advertising reports relating to paid search efforts. Specifically, we will dive into ROI calculation to check its validity. In addition, we want to understand what the impact would be after applying sponsered search advertising by carrying out more careful experiment(Difference in Difference, Fixed Effect) 
+
+# Executive Summary
+### 1) What is Wrong with Bob’s RoI Calculation? 
+a. The current ROI assumption as Myra mentioned is that it supposes everyone who clicks the ads is totally driven by the sponsored ads. However, they are likely to visit the website via organic link no matter if the ads existed or not. To sum up, it will lead to the over-evaluation of ROI.
+
+
+```{r message=FALSE,warning=FALSE}
+library(dplyr)
+library(readxl)
+library(ggplot2)
+```
+
+```{r}
+# Import the data
+data = read.csv("C:/Users/nba35/Desktop/UMN/Casual Inference/HW/HW3/did_sponsored_ads.csv")
+```
+### 2) Define the Treatment and Control.
+Treatment is the stop of sponsored search ads on Google during 10th, 11th, 12th weeks. Control group will be Bing, Yahoo, and Ask.
+
+```{r}
+## Set up the treatment group
+data <- data %>% 
+  mutate(treatment = ifelse(platform == 'goog', 1, 0), 
+         after = ifelse(week %in% c(10, 11, 12), 1, 0), 
+         total_traffic = avg_spons + avg_org)
+```
+
+### 3) Consider a First Difference Estimate. 
+```{r}
+data_goog <- data %>%
+  filter(platform == 'goog')
+```
+
+```{r}
+## check the distribution of total traffic
+hist(data_goog$total_traffic)
+```
+
+```{r}
+model1 <- lm(log(total_traffic + 1) ~ after, data = data_goog)
+summary(model1)
+```
+```{r}
+(exp(0.001243) - 1) * 100
+```
+### Interpretation 
+Without applying sponsored search ads on Google, we observed 0.13% increase in weekly total traffic to the website. However, the p-value is 0.9981, which is not less than 0.5, so we cannot make the conclusion that there are differences between having sponsored ads and not. In addition, it is not a good idea to solely rely on this number as our estimate of the causal effect of the treatment. There are two concerning problems. One is we assume the market remains constant and the traffic will not change due to outside effects. This issue can be solved by applying **Difference in Difference**. The other one is there are likely some features which is time invariant that are likely to influence the total traffic. This issue can be solved by **Fixed Effect**
+
+### 4) Calculate the Difference-in-Differences. 
+
+```{r}
+## Visualization of parallel trend
+bing = data %>% filter(platform == 'bing') %>% select(week, total_traffic)
+yahoo = data %>% filter(platform == 'yahoo') %>% select(week, total_traffic)
+ask = data %>% filter(platform == 'ask') %>% select(week, total_traffic)
+```
+```{r}
+ggplot(data %>% filter(platform == 'goog'), aes(x = week, y = total_traffic, color = 'Google')) + 
+  geom_line() +
+  geom_line(aes(x = week, y = total_traffic, color = 'Bing'), data = bing) +
+  geom_line(aes(x = week, y = total_traffic, color = 'Yahoo'), data = yahoo) +
+  geom_line(aes(x = week, y = total_traffic, color = 'Ask'), data = ask) + 
+  geom_vline(xintercept = 9, color='orange') + 
+  scale_x_continuous(breaks = seq(1, 12, by = 1))
+  labs(y = "Total Traffic", x = "Week") + 
+  theme_bw() + 
+  theme(legend.title = element_blank())
+```
+
+```{r}
+## Run a dynamic DiD model to test parallelism
+dyn_model2 <- lm(log(total_traffic + 1) ~ treatment*factor(week), data = data)
+summary(dyn_model2)
+```
+### Interpretation 
+The coefficient of the interaction between treatment and factor not equal zero, which means the assumption didn't. But we still apply DiD regression.
+
+```{r}
+did_model3 <- lm(log(total_traffic + 1) ~ treatment*after, data = data)
+summary(did_model3)
+```
+```{r}
+(exp(-1.1161) - 1) *100
+```
+### Interpretation 
+Without sponsored ads on the Google platform, Bazzar.com has 67.2% decrease. The new treatment effect estimated over and above the control group can more accurately capture the true causality for the sponsored ads compared to the pre-post estimate.
+
+### 5)	Given Your Treatment Effect Estimate, Fix Bob’s RoI Calculation
+- To compute the correct ROI, We need to determine the traffic that would have used organic search results. 
+
+```{r}
+## check the distribution of avg organic traffic
+hist(data$avg_org)
+```
+
+
+```{r}
+did_model4 <- lm(log(avg_org + 1) ~ treatment * after, data = data)
+summary(did_model4)
+```
+```{r}
+(exp(0.2288) - 1) * 100
+```
+```{r}
+## Know the proportion of traffic that truly motivated by sponsored ads
+true_proportion = 67.2 /(25.71 + 67.2)
+true_proportion 
+```
+
+```{r}
+## The new ROI: Margin per conversion * probabilty of click * proportion - cost per click) / cost of click 
+New_ROI = (21 * 0.12 *0.723 - 0.6) / 0.6
+New_ROI
+```
